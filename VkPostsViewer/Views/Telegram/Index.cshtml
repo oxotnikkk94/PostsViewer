@@ -1,0 +1,58 @@
+﻿@model IEnumerable<VkPostsViewer.Controllers.TelegramPost>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telegram Posts</title>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+        }
+
+        th {
+            background-color: #f4f4f4;
+        }
+
+        .tag {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <h1>Telegram Posts</h1>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Username</th>
+                <th>URL</th>
+                <th>Tag</th>
+                <th>Text</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var post in Model)
+            {
+                <tr>
+                    <td>@post.Date</td>
+                    <td>@post.Time</td>
+                    <td>@post.Username</td>
+                    <td><a href="@post.Url" target="_blank">Link</a></td>
+                    <td class="tag">@post.Tag</td>
+                    <td>@post.Text</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</body>
+</html>
