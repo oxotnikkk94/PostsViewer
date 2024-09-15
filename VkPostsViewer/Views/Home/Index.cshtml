@@ -1,0 +1,87 @@
+﻿@{
+    ViewData["Title"] = "Главная страница";
+}
+
+<h2>Парсинг сайтов по ключевым словам</h2>
+
+<div id="loadingMessage" style="display: none;">
+    Идет загрузка, пожалуйста, подождите...
+</div>
+
+<table class="table" id="resultTable" style="display: none;">
+    <thead>
+        <tr>
+            <th>Дата публикации</th>
+            <th>Источник</th>
+            <th>Тег</th>
+            <th>Текст</th>
+        </tr>
+    </thead>
+    <tbody>
+    </tbody>
+</table>
+
+<div id="parsingTime" style="display: none;">
+    Время парсинга: <span id="parsingTimeValue"></span> секунд.
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const loadingMessage = document.getElementById("loadingMessage");
+        const resultTable = document.getElementById("resultTable");
+        const tableBody = resultTable.querySelector("tbody");
+        const parsingTimeDiv = document.getElementById("parsingTime");
+        const parsingTimeValue = document.getElementById("parsingTimeValue");
+
+        loadingMessage.style.display = "block";
+
+        fetch('/SiteParser/GetParsedData')
+            .then(response => response.json())
+            .then(data => {
+                loadingMessage.style.display = "none";
+                resultTable.style.display = "table";
+                parsingTimeDiv.style.display = "block";
+                parsingTimeValue.textContent = data.parsingTime;
+
+                data.results.forEach(item => {
+                    const row = document.createElement("tr");
+
+                    const dateCell = document.createElement("td");
+                    dateCell.textContent = new Date(item.date).toLocaleString();
+                    row.appendChild(dateCell);
+
+                    const sourceCell = document.createElement("td");
+                    sourceCell.textContent = item.sourceUrl; // Просто текст без ссылки
+                    row.appendChild(sourceCell);
+
+                    const tagCell = document.createElement("td");
+                    tagCell.innerHTML = `<span style="color:red">${item.tag}</span>`;
+                    row.appendChild(tagCell);
+
+                    const textCell = document.createElement("td");
+
+                    // Выпадающий список для текста
+                    const details = document.createElement("details");
+                    const summary = document.createElement("summary");
+
+                    const previewText = item.text.length > 100 ? item.text.substring(0, 100) + '...' : item.text;
+                    summary.textContent = previewText; // Заголовок (короткий текст)
+
+                    const fullText = document.createElement("p");
+                    fullText.textContent = item.text; // Полный текст
+
+                    details.appendChild(summary);
+                    details.appendChild(fullText);
+                    textCell.appendChild(details);
+
+                    row.appendChild(textCell);
+
+                    tableBody.appendChild(row);
+                });
+            })
+            .catch(error => {
+                loadingMessage.textContent = "Ошибка загрузки данных!";
+                console.error('Ошибка:', error);
+            });
+    });
+</script>
