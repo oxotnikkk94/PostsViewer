@@ -3,6 +3,21 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
+# Исключение виртуальной среды окружения
+python_parser/parser_env/
+
+# Игнорирование системных файлов
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Файлы IDE (если ты используешь, например, PyCharm)
+.idea/
+
+# Логи и временные файлы
+*.log
+*.tmp
+
 # User-specific files
 *.rsuser
 *.suo
