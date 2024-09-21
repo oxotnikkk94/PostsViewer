@@ -1,36 +1,33 @@
-import vk_api
-import pandas as pd
-from datetime import datetime, timedelta
+from telethon import TelegramClient
+from telethon.errors import SessionPasswordNeededError
+import asyncio
+import os
 import pymorphy2
 
-from transformers import BertForSequenceClassification
+# Вставьте сюда свои значения
+api_id = '26908424'
+api_hash = '9d40c54db3163c9141ef097b97415d37'
+phone_number = '+79296727018'
 
-# Инициализация MorphAnalyzer
-morph = pymorphy2.MorphAnalyzer()
-
-# Авторизация через токен
-access_token = '5340627a5340627a5340627a07505e4aba553405340627a35a6df42b88c441143d65a89'
-vk_session = vk_api.VkApi(token=access_token)
-vk = vk_session.get_api()
-
-# Список групп
-groups = [
-    'poboru',
-    'ro_s_t',
-    'kzn',
-    'region_kazan116',
-    'kznlife',
+# Список каналов
+channels = [
+    '@kazancity',
     'vkazani',
-    'kazanushka',
-    'public109737032',
-    'kazan_news',
-    'kazan__kzn',
-    'i_kzn',
-    #  'megamamakazan',
-    'kazanpronews',
-    'kazan.aktual',
-    'tatarstan_da'
+    'region116_dtp_official',
+    'kznonline',
+    'kzn_official',
+    'tatarstan_da',
+    'Eduvtatarstan',
+    'kznpapa',
+    'prtatar',
+    'gazetabo',
+    'kazanfirst',
+    'inkazanischa',
+    'Tatarstan24TV',
+    'szsocpit',
+    'tatmediaofficial'
 ]
+
 # Ключевые слова для фильтрации
 tags = [
     "школьное питание",
@@ -164,135 +161,46 @@ tags = [
     "Оставить жалобу на питание в Казани",
 ]
 
+morph = pymorphy2.MorphAnalyzer()
 
-# # Получаем последние посты из группы
-# def get_news(group_name, last_posts_count):
-#     group_id = vk.groups.getById(group_id=group_name)[0]['id']
-#     posts = vk.wall.get(owner_id=-group_id, count=last_posts_count)  # - перед group_id для публичных страниц
-#     for post in posts['items']:
-#         print(post['text'])  # Вывод текста постов
-#
-# # Пример получения новостей из всех групп
-# for group in groups:
-#     print(f"Новости из группы {group}:")
-#     get_news(group, 1000)
-#     print("-" * 40)
-#
-
-
-# Функция для лемматизации текста
-def lemmatize(text):
+def normalize_text(text):
+    """Нормализует текст, возвращая его в базовую форму."""
     words = text.split()
-    lemmas = [morph.parse(word)[0].normal_form for word in words]
-    return " ".join(lemmas)
+    normalized_words = [morph.parse(word)[0].normal_form for word in words]
+    return normalized_words
 
+async def main():
+    client = TelegramClient('session_name', api_id, api_hash)
 
-# Лемматизируем ключевые слова
-lemmatized_tags = [lemmatize(tag) for tag in tags]
+    await client.start()
 
+    if not await client.is_user_authorized():
+        await client.send_code_request(phone_number)
+        try:
+            await client.sign_in(phone_number, input('Enter the code: '))
+        except SessionPasswordNeededError:
+            await client.sign_in(password=input('Enter your password: '))
 
-# Функция для получения всех постов группы с использованием offset
-def get_all_posts(group_name, days=365, max_posts=1000):
-    group_id = vk.groups.getById(group_id=group_name)[0]['id']
-    posts = []
-    offset = 0
-    count = 100  # Максимальное количество постов за один запрос
-    total_posts = 0
+    messages_data = []
 
-    current_time = datetime.now()
-    time_limit = current_time - timedelta(days=days)
+    for channel in channels:
+        try:
+            async for message in client.iter_messages(channel, limit=100):
+                if message.text:
+                    normalized_message = normalize_text(message.text)
+                    if any(tag in normalized_message for tag in tags):
+                        messages_data.append((channel, message.text))
+        except Exception as e:
+            print(f"Could not retrieve messages from {channel}: {e}")
 
-    while True:
-        # Запрашиваем посты с указанием смещения
-        response = vk.wall.get(owner_id=-group_id, count=count, offset=offset, v=5.199)
-        new_posts = response['items']
+    # Сохраняем данные в HTML файл
+    with open('parse_tg.html', 'w', encoding='utf-8') as f:
+        f.write('<html><body>')
+        f.write('<h1>Парсинг Telegram Каналов</h1>')
+        for channel, message in messages_data:
+            f.write(f'<h2>Канал: {channel}</h2>')
+            f.write(f'<p>{message}</p>')
+        f.write('</body></html>')
 
-        if not new_posts:  # Если новых постов больше нет, выходим из цикла
-            break
-
-        for post in new_posts:
-            post_date = datetime.fromtimestamp(post['date'])
-            if post_date < time_limit:  # Если пост старше лимита по дате, выходим
-                return posts  # Возвращаем уже собранные посты
-
-            posts.append(post)
-            total_posts += 1
-
-            if total_posts >= max_posts:  # Если достигли максимального лимита постов, выходим
-                return posts
-
-        offset += count  # Увеличиваем смещение для следующего запроса
-
-    return posts
-
-
-# Функция фильтрации постов по ключевым словам с учетом лемматизации
-def filter_posts_by_tags(post_text):
-    lemmatized_text = lemmatize(post_text)
-    for tag in lemmatized_tags:
-        if tag.lower() in lemmatized_text.lower():
-            return tag  # Возвращаем найденный тег
-    return None
-
-
-# Фильтруем посты по тегам и дате с использованием get_all_posts
-def get_filtered_news(group_name, days=365, max_posts=1000):
-    posts = get_all_posts(group_name, days, max_posts)
-    print(f"Получено {len(posts)} постов из группы {group_name}")
-
-    filtered_posts = []
-
-    for post in posts:
-        found_tag = filter_posts_by_tags(post['text'])
-        if found_tag:  # Если тег найден, добавляем пост в отфильтрованные
-            post_date = datetime.fromtimestamp(post['date'])
-            filtered_posts.append({
-                'group': group_name,
-                'text': post['text'],
-                'date': post_date.strftime("%Y-%m-%d %H:%M:%S"),
-                'found_tag': found_tag,
-            })
-
-    return filtered_posts
-
-
-# Пример сохранения отфильтрованных данных в CSV
-def save_to_csv(filtered_data, filename="vk_news.csv"):
-    df = pd.DataFrame(filtered_data)
-    df.to_csv(filename, index=False)
-
-
-# Функция для сохранения отфильтрованных данных в HTML файл
-def save_to_html(filtered_data, filename="vk_news.html"):
-    html_content = """
-    <html>
-    <head><title>Отфильтрованные новости ВК</title></head>
-    <body>
-    <h1>Новости по ключевым словам</h1>
-    <table border="1">
-    <tr><th>Группа</th><th>Ключевое слово</th><th>Дата</th><th>Пост</th><th>Настроение</th></tr>
-    """  # Добавили столбец "Настроение"
-
-    for post in filtered_data:
-        html_content += f"<tr><td>{post['group']}</td><td>{post['found_tag']}</td><td>{post['date']}</td><td>{post['text']}</td></tr>"
-
-    html_content += """
-    </table>
-    </body>
-    </html>
-    """
-
-    with open(filename, "w", encoding='utf-8') as file:
-        file.write(html_content)
-
-
-# Пример использования:
-filtered_data = []
-
-for group in groups:
-    print(f"Фильтруем новости из группы {group}:")
-    filtered_posts = get_filtered_news(group, days=30, max_posts=100)  # Получаем посты за последние 365 дней
-    filtered_data.extend(filtered_posts)
-
-# Сохраняем отфильтрованные новости в HTML файл
-save_to_html(filtered_data)
+# Запуск асинхронной функции
+asyncio.run(main())
