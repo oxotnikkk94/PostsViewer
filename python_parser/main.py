@@ -3,8 +3,6 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pymorphy2
 
-from transformers import BertForSequenceClassification
-
 # Инициализация MorphAnalyzer
 morph = pymorphy2.MorphAnalyzer()
 
@@ -12,6 +10,19 @@ morph = pymorphy2.MorphAnalyzer()
 access_token = '5340627a5340627a5340627a07505e4aba553405340627a35a6df42b88c441143d65a89'
 vk_session = vk_api.VkApi(token=access_token)
 vk = vk_session.get_api()
+
+from transformers import pipeline
+
+# Инициализация модели с использованием transformers
+sentiment_model = pipeline("sentiment-analysis", model="blanchefort/rubert-base-cased-sentiment")
+
+
+# Определение настроения поста с помощью DeepPavlov
+def get_post_sentiment(post_text):
+    result = sentiment_model([post_text])
+    sentiment = result[0]['label']  # Получаем результат анализа настроений
+    return sentiment
+
 
 # Список групп
 groups = [
@@ -165,19 +176,23 @@ tags = [
 ]
 
 
-# # Получаем последние посты из группы
-# def get_news(group_name, last_posts_count):
-#     group_id = vk.groups.getById(group_id=group_name)[0]['id']
-#     posts = vk.wall.get(owner_id=-group_id, count=last_posts_count)  # - перед group_id для публичных страниц
-#     for post in posts['items']:
-#         print(post['text'])  # Вывод текста постов
-#
-# # Пример получения новостей из всех групп
-# for group in groups:
-#     print(f"Новости из группы {group}:")
-#     get_news(group, 1000)
-#     print("-" * 40)
-#
+# Функция для получения информации об авторе поста
+def get_author_info(from_id):
+    if from_id > 0:
+        # Это пользователь, получаем информацию о пользователе
+        user_info = vk.users.get(user_ids=from_id)[0]
+        author = {
+            'name': f"{user_info['first_name']} {user_info['last_name']}",
+            'profile_url': f"https://vk.com/id{from_id}"
+        }
+    else:
+        # Это группа, получаем информацию о группе
+        group_info = vk.groups.getById(group_id=abs(from_id))[0]
+        author = {
+            'name': group_info['name'],
+            'profile_url': f"https://vk.com/club{abs(from_id)}"
+        }
+    return author
 
 
 # Функция для лемматизации текста
@@ -235,7 +250,7 @@ def filter_posts_by_tags(post_text):
     return None
 
 
-# Фильтруем посты по тегам и дате с использованием get_all_posts
+# Функция фильтрации постов по тегам и дате с использованием get_all_posts
 def get_filtered_news(group_name, days=365, max_posts=1000):
     posts = get_all_posts(group_name, days, max_posts)
     print(f"Получено {len(posts)} постов из группы {group_name}")
@@ -246,11 +261,14 @@ def get_filtered_news(group_name, days=365, max_posts=1000):
         found_tag = filter_posts_by_tags(post['text'])
         if found_tag:  # Если тег найден, добавляем пост в отфильтрованные
             post_date = datetime.fromtimestamp(post['date'])
+            sentiment = get_post_sentiment(post['text'])  # Получаем настроение поста
             filtered_posts.append({
                 'group': group_name,
                 'text': post['text'],
                 'date': post_date.strftime("%Y-%m-%d %H:%M:%S"),
                 'found_tag': found_tag,
+                'sentiment': sentiment,
+                'from_id': post['from_id']  # Добавляем поле с ID автора
             })
 
     return filtered_posts
@@ -262,28 +280,25 @@ def save_to_csv(filtered_data, filename="vk_news.csv"):
     df.to_csv(filename, index=False)
 
 
-# Функция для сохранения отфильтрованных данных в HTML файл
-def save_to_html(filtered_data, filename="vk_news.html"):
-    html_content = """
-    <html>
-    <head><title>Отфильтрованные новости ВК</title></head>
-    <body>
-    <h1>Новости по ключевым словам</h1>
-    <table border="1">
-    <tr><th>Группа</th><th>Ключевое слово</th><th>Дата</th><th>Пост</th><th>Настроение</th></tr>
-    """  # Добавили столбец "Настроение"
+# Пример сохранения отфильтрованных данных в HTML файл
+def save_to_html(posts, file_name='vk_news.html'):
+    with open(file_name, 'w', encoding='utf-8') as f:
+        f.write("<table border='1'>\n")
+        f.write("<tr><th>Дата</th><th>Текст</th><th>Настроение</th><th>Автор</th></tr>\n")
 
-    for post in filtered_data:
-        html_content += f"<tr><td>{post['group']}</td><td>{post['found_tag']}</td><td>{post['date']}</td><td>{post['text']}</td></tr>"
+        for post in posts:
+            date = post['date']
+            text = post['text']
+            sentiment = post['sentiment']
 
-    html_content += """
-    </table>
-    </body>
-    </html>
-    """
+            # Получаем информацию об авторе поста
+            author_info = get_author_info(post['from_id'])
 
-    with open(filename, "w", encoding='utf-8') as file:
-        file.write(html_content)
+            f.write(
+                f"<tr><td>{date}</td><td>{text}</td><td>{sentiment}</td><td><a href='{author_info['profile_url']}'>{author_info['name']}</a></td></tr>\n"
+            )
+
+        f.write("</table>\n")
 
 
 # Пример использования:
@@ -291,7 +306,7 @@ filtered_data = []
 
 for group in groups:
     print(f"Фильтруем новости из группы {group}:")
-    filtered_posts = get_filtered_news(group, days=30, max_posts=100)  # Получаем посты за последние 365 дней
+    filtered_posts = get_filtered_news(group, days=10, max_posts=100)  # Получаем посты за последние 365 дней
     filtered_data.extend(filtered_posts)
 
 # Сохраняем отфильтрованные новости в HTML файл
