@@ -3,8 +3,6 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pymorphy2
 
-from transformers import BertForSequenceClassification
-
 # Инициализация MorphAnalyzer
 morph = pymorphy2.MorphAnalyzer()
 
@@ -12,6 +10,19 @@ morph = pymorphy2.MorphAnalyzer()
 access_token = '5340627a5340627a5340627a07505e4aba553405340627a35a6df42b88c441143d65a89'
 vk_session = vk_api.VkApi(token=access_token)
 vk = vk_session.get_api()
+
+from transformers import pipeline
+
+# Инициализация модели с использованием transformers
+sentiment_model = pipeline("sentiment-analysis", model="blanchefort/rubert-base-cased-sentiment")
+
+
+# Определение настроения поста с помощью DeepPavlov
+def get_post_sentiment(post_text):
+    result = sentiment_model([post_text])
+    sentiment = result[0]['label']  # Получаем результат анализа настроений
+    return sentiment
+
 
 # Список групп
 groups = [
@@ -165,21 +176,6 @@ tags = [
 ]
 
 
-# # Получаем последние посты из группы
-# def get_news(group_name, last_posts_count):
-#     group_id = vk.groups.getById(group_id=group_name)[0]['id']
-#     posts = vk.wall.get(owner_id=-group_id, count=last_posts_count)  # - перед group_id для публичных страниц
-#     for post in posts['items']:
-#         print(post['text'])  # Вывод текста постов
-#
-# # Пример получения новостей из всех групп
-# for group in groups:
-#     print(f"Новости из группы {group}:")
-#     get_news(group, 1000)
-#     print("-" * 40)
-#
-
-
 # Функция для лемматизации текста
 def lemmatize(text):
     words = text.split()
@@ -189,6 +185,79 @@ def lemmatize(text):
 
 # Лемматизируем ключевые слова
 lemmatized_tags = [lemmatize(tag) for tag in tags]
+
+
+# Функция для получения информации об авторе поста
+def get_author_info(from_id):
+    if from_id > 0:
+        # Это пользователь, получаем информацию о пользователе
+        user_info = vk.users.get(user_ids=from_id)[0]
+        author = {
+            'name': f"{user_info['first_name']} {user_info['last_name']}",
+            'profile_url': f"https://vk.com/id{from_id}"
+        }
+    else:
+        # Это группа, получаем информацию о группе
+        group_info = vk.groups.getById(group_id=abs(from_id))[0]
+        author = {
+            'name': group_info['name'],
+            'profile_url': f"https://vk.com/club{abs(from_id)}"
+        }
+    return author
+
+
+# Функция для получения информации о пользователе или группе по ID
+def get_user_info(user_id):
+    try:
+        if user_id < 0:
+            # Если ID отрицательный, это группа, получаем данные о группе
+            group_id = abs(user_id)
+            response = vk.groups.getById(group_id=group_id, v=5.199)
+            if response:  # Проверяем, что ответ не пустой
+                group = response[0]
+                return {
+                    'name': group.get('name', 'Unknown Group'),
+                    'profile_url': f"https://vk.com/club{group.get('id', '')}"
+                }
+            else:
+                return {'name': 'Unknown Group', 'profile_url': '#'}
+        else:
+            # Если ID положительный, это пользователь, получаем данные о пользователе
+            response = vk.users.get(user_ids=user_id, fields='screen_name', v=5.199)
+            if response:  # Проверяем, что ответ не пустой
+                user = response[0]
+                return {
+                    'name': f"{user.get('first_name', 'Unknown')} {user.get('last_name', 'User')}",
+                    'profile_url': f"https://vk.com/{user.get('screen_name', '')}"
+                }
+            else:
+                return {'name': 'Unknown User', 'profile_url': '#'}
+    except Exception as e:
+        print(f"Ошибка при получении данных о пользователе или группе с ID {user_id}: {e}")
+        return {'name': 'Unknown', 'profile_url': '#'}
+
+# Функция для получения комментариев к посту
+def get_post_comments(post_id, owner_id, max_comments=100):
+    comments = []
+    offset = 0
+    count = 100  # Максимальное количество комментариев за один запрос
+
+    while True:
+        # Запрашиваем комментарии к посту
+        response = vk.wall.getComments(owner_id=owner_id, post_id=post_id, count=count, offset=offset, v=5.199)
+        new_comments = response['items']
+
+        if not new_comments:  # Если новых комментариев больше нет, выходим из цикла
+            break
+
+        comments.extend(new_comments)
+
+        if len(comments) >= max_comments:  # Если достигли максимального лимита комментариев, выходим
+            return comments
+
+        offset += count  # Увеличиваем смещение для следующего запроса
+
+    return comments
 
 
 # Функция для получения всех постов группы с использованием offset
@@ -235,8 +304,8 @@ def filter_posts_by_tags(post_text):
     return None
 
 
-# Фильтруем посты по тегам и дате с использованием get_all_posts
-def get_filtered_news(group_name, days=365, max_posts=1000):
+# Обновленная функция фильтрации новостей с обработкой комментариев и авторов
+def get_filtered_news_with_comments(group_name, days=365, max_posts=1000, max_comments=100):
     posts = get_all_posts(group_name, days, max_posts)
     print(f"Получено {len(posts)} постов из группы {group_name}")
 
@@ -246,12 +315,43 @@ def get_filtered_news(group_name, days=365, max_posts=1000):
         found_tag = filter_posts_by_tags(post['text'])
         if found_tag:  # Если тег найден, добавляем пост в отфильтрованные
             post_date = datetime.fromtimestamp(post['date'])
-            filtered_posts.append({
+            sentiment = get_post_sentiment(post['text'])  # Получаем настроение поста
+
+            # Получаем автора поста
+            author_info = get_user_info(post['from_id'])
+
+            post_data = {
                 'group': group_name,
                 'text': post['text'],
                 'date': post_date.strftime("%Y-%m-%d %H:%M:%S"),
                 'found_tag': found_tag,
-            })
+                'sentiment': sentiment,
+                'author': author_info,  # Информация об авторе поста
+                'comments': []  # Сюда будем добавлять комментарии
+            }
+
+            # Получаем комментарии к посту
+            post_id = post['id']
+            owner_id = post['owner_id']
+            comments = get_post_comments(post_id, owner_id, max_comments)
+
+            # Обрабатываем каждый комментарий
+            for comment in comments:
+                comment_text = comment['text']
+                comment_sentiment = get_post_sentiment(comment_text)  # Получаем настроение комментария
+
+                # Получаем автора комментария
+                comment_author_info = get_user_info(comment['from_id'])
+
+                comment_data = {
+                    'text': comment_text,
+                    'sentiment': comment_sentiment,
+                    'author': comment_author_info  # Информация об авторе комментария
+                }
+
+                post_data['comments'].append(comment_data)
+
+            filtered_posts.append(post_data)
 
     return filtered_posts
 
@@ -262,37 +362,45 @@ def save_to_csv(filtered_data, filename="vk_news.csv"):
     df.to_csv(filename, index=False)
 
 
-# Функция для сохранения отфильтрованных данных в HTML файл
-def save_to_html(filtered_data, filename="vk_news.html"):
-    html_content = """
-    <html>
-    <head><title>Отфильтрованные новости ВК</title></head>
-    <body>
-    <h1>Новости по ключевым словам</h1>
-    <table border="1">
-    <tr><th>Группа</th><th>Ключевое слово</th><th>Дата</th><th>Пост</th><th>Настроение</th></tr>
-    """  # Добавили столбец "Настроение"
+# Обновленная функция сохранения данных в HTML файл с комментариями
+# Обновленная функция сохранения данных в HTML файл с комментариями и авторами
+def save_to_html_with_comments(posts, file_name='output_with_comments.html'):
+    with open(file_name, 'w', encoding='utf-8') as f:
+        f.write("<table border='1'>\n")
+        f.write("<tr><th>Дата</th><th>Текст</th><th>Настроение</th><th>Автор</th><th>Комментарии</th></tr>\n")
 
-    for post in filtered_data:
-        html_content += f"<tr><td>{post['group']}</td><td>{post['found_tag']}</td><td>{post['date']}</td><td>{post['text']}</td></tr>"
+        for post in posts:
+            date = post['date']
+            text = post['text']
+            sentiment = post['sentiment']
+            author = post['author']
 
-    html_content += """
-    </table>
-    </body>
-    </html>
-    """
+            f.write(
+                f"<tr><td>{date}</td><td>{text}</td><td>{sentiment}</td><td><a href='{author['profile_url']}'>{author['name']}</a></td>\n")
 
-    with open(filename, "w", encoding='utf-8') as file:
-        file.write(html_content)
+            # Добавляем комментарии к посту
+            if post['comments']:
+                f.write("<td><ul>\n")
+                for comment in post['comments']:
+                    comment_text = comment['text']
+                    comment_sentiment = comment['sentiment']
+                    comment_author = comment['author']
+                    f.write(
+                        f"<li>{comment_text} (Настроение: {comment_sentiment}, Автор: <a href='{comment_author['profile_url']}'>{comment_author['name']}</a>)</li>\n")
+                f.write("</ul></td></tr>\n")
+            else:
+                f.write("<td>Нет комментариев</td></tr>\n")
+
+        f.write("</table>")
 
 
 # Пример использования:
-filtered_data = []
+filtered_data_with_comments = []
 
 for group in groups:
     print(f"Фильтруем новости из группы {group}:")
-    filtered_posts = get_filtered_news(group, days=30, max_posts=100)  # Получаем посты за последние 365 дней
-    filtered_data.extend(filtered_posts)
+    filtered_posts_with_comments = get_filtered_news_with_comments(group, days=100, max_posts=100)
+    filtered_data_with_comments.extend(filtered_posts_with_comments)
 
-# Сохраняем отфильтрованные новости в HTML файл
-save_to_html(filtered_data)
+# Сохраняем отфильтрованные новости с комментариями и авторами в HTML файл
+save_to_html_with_comments(filtered_data_with_comments)
