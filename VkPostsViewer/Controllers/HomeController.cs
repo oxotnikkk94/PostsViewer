@@ -8,5 +8,11 @@ namespace VkPostsViewer.Controllers
         {
             return View();
         }
+
+        public IActionResult GetFilteredNewsJson(int offset, int limit)
+        {
+            // Здесь ваша логика получения постов
+            return Json(new List<VkPostViewModel>());
+        }
     }
 }

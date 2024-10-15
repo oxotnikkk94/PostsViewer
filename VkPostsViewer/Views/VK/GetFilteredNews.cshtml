@@ -1,0 +1,38 @@
+﻿@model List<VkPostsViewer.Controllers.VkPostViewModel>
+
+@{
+    ViewData["Title"] = "Отфильтрованные новости";
+}
+
+<h2>Отфильтрованные новости</h2>
+
+<table class="table">
+    <thead>
+        <tr>
+            <th>Группа</th>
+            <th>Текст поста</th>
+            <th>Дата</th>
+            <th>Настроение</th>
+            <th>Комментарии</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var post in Model)
+        {
+            <tr>
+                <td>@post.Group</td>
+                <td>@post.Text</td>
+                <td>@post.Date?.ToString("g")</td>
+                <td>@post.Sentiment</td>
+                <td>
+                    <ul>
+                        @foreach (var comment in post.Comments)
+                        {
+                            <li>@comment.Author: @comment.Text (Настроение: @comment.Sentiment)</li>
+                        }
+                    </ul>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>

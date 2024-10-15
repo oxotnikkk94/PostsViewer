@@ -4,6 +4,8 @@ using Microsoft.Extensions.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Добавляем HttpClient в DI-контейнер
+builder.Services.AddHttpClient();
 
 // Add services to the container.
 builder.Services.AddControllersWithViews();
@@ -34,6 +36,11 @@ app.MapControllerRoute(
     name: "parsing",
     pattern: "parsing",
     defaults: new { controller = "Telegram", action = "Index" });
+
+app.MapControllerRoute(
+        name: "vk",
+        pattern: "vk/{action=GetFilteredNews}/{id?}",
+        defaults: new { controller = "VK" });
 
 
 app.Run();
