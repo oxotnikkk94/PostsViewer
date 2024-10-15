@@ -1,15 +1,10 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using System.Text;
+using Microsoft.AspNetCore.Mvc;
 using VkNet;
-using VkNet.Model;
-using System.Net.Http;
-using System.Text;
-using Newtonsoft.Json;
 using VkNet.Exception;
-using PostsViewer.Controllers;
-using static Microsoft.Extensions.Logging.EventSource.LoggingEventSource;
-using static System.Net.Mime.MediaTypeNames;
+using VkNet.Model;
 
-namespace VkPostsViewer.Controllers
+namespace PostsViewer.Controllers
 {
     public class VkController : Controller
     {

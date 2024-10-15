@@ -1,6 +1,6 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 
-namespace VkPostsViewer.Controllers
+namespace PostsViewer.Controllers
 {
     public class HomeController : Controller
     {
