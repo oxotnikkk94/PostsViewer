@@ -1,58 +1,31 @@
-﻿@model IEnumerable<VkPostsViewer.Controllers.TelegramPost>
+﻿@model List<VkPostsViewer.Controllers.TelegramController.ParsedResult>
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Telegram Posts</title>
-    <style>
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
+<h2>Результаты парсинга Telegram</h2>
 
-        th, td {
-            border: 1px solid #ddd;
-            padding: 8px;
-        }
-
-        th {
-            background-color: #f4f4f4;
-        }
-
-        .tag {
-            color: red;
-        }
-    </style>
-</head>
-<body>
-    <h1>Telegram Posts</h1>
-
-    <table>
-        <thead>
+<table class="table">
+    <thead>
+        <tr>
+            <th>Дата публикации</th>
+            <th>Источник</th>
+            <th>Тег</th>
+            <th>Текст</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var item in Model)
+        {
             <tr>
-                <th>Date</th>
-                <th>Time</th>
-                <th>Username</th>
-                <th>URL</th>
-                <th>Tag</th>
-                <th>Text</th>
+                <td>@item.Date.ToString("g")</td>
+                <td>@item.SourceUrl</td>
+                <td><span style="color: red">@item.Tag</span></td>
+                <td>
+                    <details>
+                        <summary>@(item.Text.Length > 100 ? item.Text.Substring(0, 100) + "..." : item.Text)</summary>
+                        <p>@item.Text</p>
+                    </details>
+                </td>
             </tr>
-        </thead>
-        <tbody>
-            @foreach (var post in Model)
-            {
-                <tr>
-                    <td>@post.Date</td>
-                    <td>@post.Time</td>
-                    <td>@post.Username</td>
-                    <td><a href="@post.Url" target="_blank">Link</a></td>
-                    <td class="tag">@post.Tag</td>
-                    <td>@post.Text</td>
-                </tr>
-            }
-        </tbody>
-    </table>
-</body>
-</html>
+        }
+    </tbody>
+</table>
+

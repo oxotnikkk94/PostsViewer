@@ -1,419 +1,188 @@
-﻿using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Caching.Memory;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net.Http;
-using System.Threading.Tasks;
-using HtmlAgilityPack;
-using System.Collections.Concurrent;
+﻿    using Microsoft.AspNetCore.Mvc;
+    using Microsoft.Extensions.Caching.Memory;
+    using Newtonsoft.Json;
+    using System;
+    using System.Collections.Generic;
+    using System.IO;
+    using System.Linq;
+    using System.Threading.Tasks;
+using VkNet.Model;
+using WTelegram;
+using TL;
 
-namespace VkPostsViewer.Controllers
-{
-    public class TelegramController : Controller
+    namespace VkPostsViewer.Controllers
     {
-        private readonly IMemoryCache _cache;
-
-        public TelegramController(IMemoryCache cache)
+        [Route("telegram")]
+        public class TelegramController : Controller
         {
-            _cache = cache;
-        }
-
-        public async Task<IActionResult> Index()
+            private readonly IMemoryCache _cache;
+            private Client _telegramClient;
+            private const string SessionFilePath = "telegram_session.bin"; // файл для хранения сессии
+            private static List<string> Tags = new List<string>
         {
-            // Попытка получить данные из кэша
-            if (!_cache.TryGetValue("TelegramPosts", out List<TelegramPost> posts))
+            "школьное питание",
+            "департамент продовольствия",
+            // Добавьте свои ключевые слова для фильтрации
+        };
+
+            public TelegramController(IMemoryCache cache)
             {
-                // Если данные не найдены в кэше, выполняем парсинг
-                posts = await FetchTelegramPosts();
-
-                // Устанавливаем данные в кэш с истечением времени через 10 минут
-                _cache.Set("TelegramPosts", posts, new MemoryCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(10)
-                });
+                _cache = cache;
             }
 
-            // Возвращаем представление с результатами
-            return View(posts);
-        }
-
-        private async Task<List<TelegramPost>> FetchTelegramPosts()
-        {
-            var channels = new List<string>
+            // Метод для авторизации по номеру телефона
+            [HttpGet("Login")]
+            public async Task<IActionResult> Login(string phoneNumber)
             {
-                "https://t.me/s/kazancity",
-                "https://t.me/s/vkazani",
-                "https://t.me/s/region116_dtp_official",
-                "https://t.me/s/kznonline",
-                "https://t.me/s/kzn_official",
-                "https://t.me/s/tatarstan_da",
-                "https://t.me/s/Eduvtatarstan",
-                "https://t.me/s/kznpapa",
-                "https://t.me/s/prtatar",
-                "https://t.me/s/gazetabo",
-                "https://t.me/s/kazanfirst",
-                "https://t.me/s/inkazanischa",
-                "https://t.me/s/Tatarstan24TV",
-                "https://t.me/s/szsocpit",
-                "https://t.me/s/tatmediaofficial"
-            };
+                if (string.IsNullOrEmpty(phoneNumber))
+                    return BadRequest("Номер телефона обязателен для авторизации.");
 
-            var parsedResults = new ConcurrentBag<TelegramPost>();
+                _telegramClient = new Client(Config);
 
-            // Ключевые слова для поиска
-            var keywords = new List<string>
-            {
-                "школьное питание",
-                "питание в школах",
-                "питание школьное",
-                "питание школьников",
-                "департамент продовольствия",
-                "департамент питания",
-                "организация питания",
-                "организация школьного питания",
-                "школьное питание",
-                "питание в школах",
-                "питание школьное",
-                "питание школьников",
-                "департамент продовольствия",
-                "департамент питания",
-                "организация питания",
-                "организация школьного питания",
-                "жалоба на питание",
-                "обращение на питание",
-                "качество питания",
-                "качественное питание",
-                "некачественное питание",
-                "жалоба на качество питания",
-                "питание детей",
-                "питание школьников",
-                "питание в казани",
-                "казанское питание",
-                "школы казани",
-                "школьники казани",
-                "poelidovolen",
-
-                "Куда пожаловаться на некачественное питание в школе Казань?",
-                "Куда пожаловаться на некачественное питание в гимназии Казань?",
-                "Куда пожаловаться на некачественное питание в гимназии Казань?",
-                "Куда пожаловаться на некачественное питание в ДОУ Казань?",
-                "Куда пожаловаться на некачественное питание в садике Казань?",
-                "Куда пожаловаться на некачественное питание в больнице Казань?",
-
-                "Жалоба на питание в школе Казань",
-                "Жалоба на питание в гимназии Казань",
-                "Жалоба на питание в гимназии Казань",
-                "Жалоба на питание в ДОУ Казань",
-                "Жалоба на питание в садике Казань",
-                "Жалоба на питание в больнице Казань",
-
-                "Некачественное питание в школе Казань",
-                "Некачественное питание в гимназии Казань",
-                "Некачественное питание в гимназии Казань",
-                "Некачественное питание в ДОУ Казань",
-                "Некачественное питание в садике Казань",
-                "Некачественное питание в больнице Казань",
-
-                "Плохое питание в школе Казань",
-                "Плохое питание в гимназии Казань",
-                "Плохое питание в гимназии Казань",
-                "Плохое питание в ДОУ Казань",
-                "Плохое питание в садике Казань",
-                "Плохое питание в больнице Казань",
-
-                "Ужасное питание в школе Казань",
-                "Ужасное питание в гимназии Казань",
-                "Ужасное питание в гимназии Казань",
-                "Ужасное питание в ДОУ Казань",
-                "Ужасное питание в садике Казань",
-                "Ужасное питание в больнице Казань",
-
-                "Плохо кормят в школе Казань",
-                "Плохо кормят в гимназии Казань",
-                "Плохо кормят в гимназии Казань",
-                "Плохо кормят в ДОУ Казань",
-                "Плохо кормят в садике Казань",
-                "Плохо кормят в больнице Казань",
-
-                "Кому пожаловаться на питание в школе Казань?",
-                "Кому пожаловаться на питание в гимназии Казань?",
-                "Кому пожаловаться на питание в гимназии Казань?",
-                "Кому пожаловаться на питание в ДОУ Казань?",
-                "Кому пожаловаться на питание в садике Казань?",
-                "Кому пожаловаться на питание в больнице Казань?",
-
-                "Куда обратиться по вопросам питания в школе Казань?",
-                "Куда обратиться по вопросам питания в гимназии Казань?",
-                "Куда обратиться по вопросам питания в гимназии Казань?",
-                "Куда обратиться по вопросам питания в ДОУ Казань?",
-                "Куда обратиться по вопросам питания в садике Казань?",
-                "Куда обратиться по вопросам питания в больнице Казань?",
-
-                "Кто кормит в школе Казань",
-                "Кто кормит в гимназии Казань",
-                "Кто кормит в гимназии Казань",
-                "Кто кормит в ДОУ Казань",
-                "Кто кормит в садике Казань",
-                "Кто кормит в больнице Казань",
-
-                "Оставить жалобу на питание в школе Казань",
-                "Оставить жалобу на питаниев гимназии Казань",
-                "Оставить жалобу на питание в гимназии Казань",
-                "Оставить жалобу на питание в ДОУ Казань",
-                "Оставить жалобу на питание в садике Казань",
-                "Оставить жалобу на питание в больнице Казань",
-
-                "Невкусно кормят в школе Казань",
-                "Невкусно кормят в гимназии Казань",
-                "Невкусно кормят в гимназии Казань",
-                "Невкусно кормят в ДОУ Казань",
-                "Невкусно кормят в садике Казань",
-                "Невкусно кормят в больнице Казань",
-
-                "Невкусно кормят в школе Казань",
-                "Невкусно кормят в гимназии Казань",
-                "Невкусно кормят в гимназии Казань",
-                "Невкусно кормят в ДОУ Казань",
-                "Невкусно кормят в садике Казань",
-                "Невкусно кормят в больнице Казань",
-
-                "Школа Казань питание жалоба",
-                "гимназия Казань питание жалоба",
-                "лицей Казань питание жалоба",
-                "ДОУ Казань питание жалоба",
-                "садик Казань питание жалоба",
-                "больница Казань питание жалоба",
-
-                "Где пожаловаться на питание в Казани школа",
-                "Где пожаловаться на питание в Казани гимназия",
-                "Где пожаловаться на питание в Казани лицей",
-                "Где пожаловаться на питание в Казани ДОУ",
-                "Где пожаловаться на питание в Казани сад ",
-                "Где пожаловаться на питание в Казани больница",
-
-                "Оставить жалобу на питание",
-                "Оставить жалобу на питание в Казани"
-            };
-
-            // Параллельное выполнение запросов
-            var tasks = channels.Select(channel => ParseChannelAsync(channel, parsedResults, keywords));
-            await Task.WhenAll(tasks);
-
-            return parsedResults.ToList();
-        }
-
-        private async Task ParseChannelAsync(string channelUrl, ConcurrentBag<TelegramPost> results, List<string> keywords)
-        {
-            try
-            {
-                using var httpClient = new HttpClient();
-                var response = await httpClient.GetStringAsync(channelUrl);
-                var htmlDoc = new HtmlDocument();
-                htmlDoc.LoadHtml(response);
-
-                var messageNodes = htmlDoc.DocumentNode.SelectNodes("//div[@class='tgme_widget_message_wrap js-widget_message_wrap']");
-                if (messageNodes != null)
+                // Если существует сохраненная сессия, загружаем её
+                if (System.IO.File.Exists(SessionFilePath))
                 {
-                    foreach (var messageNode in messageNodes)
+                   // _telegramClient.LoadSession(File.ReadAllBytes(SessionFilePath));
+                    return Ok("Авторизация выполнена через сохранённую сессию.");
+                }
+
+                // Пытаемся авторизоваться через номер телефона
+                try
+                {
+                    var sentCode = await _telegramClient.Login(phoneNumber);
+                    return Ok(new { Message = "Введите код, отправленный в Telegram.", PhoneNumber = phoneNumber });
+                }
+                catch (Exception ex)
+                {
+                    return BadRequest($"Ошибка авторизации: {ex.Message}");
+                }
+            }
+
+            // Метод для завершения авторизации с помощью кода, полученного из Telegram
+            [HttpPost("ConfirmCode")]
+            public async Task<IActionResult> ConfirmCode(string phoneNumber, string code)
+            {
+                try
+                {
+                    if (_telegramClient == null) _telegramClient = new Client(Config);
+                    var sentCode = await _telegramClient.Login(phoneNumber);
+
+                    if (sentCode.Type == WTelegram.Helpers.CodeType.SMS || sentCode.Type == WTelegram.Helpers.CodeType.Call)
                     {
-                        var textNode = messageNode.SelectSingleNode(".//div[@class='tgme_widget_message_text js-message_text']");
-                        var dateNode = messageNode.SelectSingleNode(".//time");
-                        var userName = channelUrl.Split("/s/")[1]; // Извлекаем имя пользователя (канала) из URL
+                        // Код отправлен, ожидаем его ввода
+                        return Ok(new { Message = "Введите код, отправленный на ваш телефон.", PhoneNumber = phoneNumber });
+                    }
 
-                        if (textNode != null && dateNode != null)
+                    await _telegramClient.Login(code); // Завершаем авторизацию
+
+                    // Сохраняем сессию в файл
+                    //System.IO.File.WriteAllBytes(SessionFilePath, _telegramClient.SaveSession());
+                    return Ok("Авторизация успешно завершена и сессия сохранена.");
+                }
+                catch (Exception ex)
+                {
+                    return BadRequest($"Ошибка подтверждения кода: {ex.Message}");
+                }
+            }
+
+            // Основной метод для получения сообщений
+            [HttpGet("GetFilteredNews")]
+            public async Task<IActionResult> GetFilteredNews()
+            {
+                // Кэшируем результаты
+                var cacheKey = "telegram_filtered_posts";
+                List<ParsedResult> allFilteredResults;
+
+                if (!_cache.TryGetValue(cacheKey, out allFilteredResults))
+                {
+                    // Загружаем сессию или выполняем авторизацию (если сессия отсутствует)
+                    await EnsureTelegramClientIsAuthenticated();
+
+                    // Получаем сообщения с каналов
+                    allFilteredResults = await FetchTelegramPosts();
+
+                    // Кэшируем результаты
+                    _cache.Set(cacheKey, allFilteredResults, new MemoryCacheEntryOptions
+                    {
+                        AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(10)
+                    });
+                }
+
+                return View("TelegramResults", allFilteredResults);
+            }
+
+            // Метод для парсинга сообщений из Telegram
+            private async Task<List<ParsedResult>> FetchTelegramPosts()
+            {
+                List<ParsedResult> results = new List<ParsedResult>();
+
+                var channels = new[] { "@your_channel_1", "@your_channel_2" }; // Укажите свои каналы
+
+                foreach (var channel in channels)
+                {
+                    var chat = await _telegramClient.Contacts_ResolveUsername(channel); // Получаем информацию о канале
+                var inputPeer = new InputPeerChannel { channel_id = chat.peer.ID, access_hash = chat.peer.access_hash };
+                var messages = await _telegramClient.Messages_GetHistory(inputPeer, 0, 0, 100);
+                    foreach (var message in messages.Messages)
+                    {
+                        if (message.message != null) // Только текстовые сообщения
                         {
-                            var dateTimeValue = dateNode.GetAttributeValue("datetime", null);
-                            if (dateTimeValue != null)
+                            var filteredTexts = FilterMessagesByTags(message.message, Tags);
+                            foreach (var text in filteredTexts)
                             {
-                                var postText = textNode.InnerText.Trim();
-                                // Фильтрация сообщения по ключевым словам
-                                if (keywords.Any(keyword => postText.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+                                results.Add(new ParsedResult
                                 {
-                                    var post = new TelegramPost
-                                    {
-                                        Text = postText,
-                                        Date = DateTime.Parse(dateTimeValue).ToShortDateString(),
-                                        Time = DateTime.Parse(dateTimeValue).ToShortTimeString(),
-                                        Username = userName,
-                                        Url = channelUrl,
-                                        Tag = ExtractTags(postText) // Извлечение тегов
-                                    };
-
-                                    results.Add(post);
-                                }
+                                    Date = message.date,
+                                    SourceUrl = channel,
+                                    Tag = Tags.FirstOrDefault(tag => text.Contains(tag, StringComparison.OrdinalIgnoreCase)),
+                                    Text = text
+                                });
                             }
-                            else
-                            {
-                                Console.WriteLine($"Не удалось извлечь дату и время из узла: {dateNode.InnerHtml}");
-                            }
-                        }
-                        else
-                        {
-                            Console.WriteLine($"Не удалось извлечь текст или дату из узлов: {textNode?.InnerHtml}, {dateNode?.InnerHtml}");
                         }
                     }
                 }
-                else
+
+                return results;
+            }
+
+            // Метод для фильтрации сообщений по ключевым словам
+            private List<string> FilterMessagesByTags(string messageText, List<string> tags)
+            {
+                return tags.Where(tag => messageText.Contains(tag, StringComparison.OrdinalIgnoreCase)).ToList();
+            }
+
+            // Проверяем, авторизован ли клиент. Если сессия сохранена, загружаем её
+            private async Task EnsureTelegramClientIsAuthenticated()
+            {
+                if (_telegramClient == null)
+                    _telegramClient = new Client(Config);
+
+                if (!System.IO.File.Exists(SessionFilePath))
                 {
-                    Console.WriteLine($"Не удалось найти узлы сообщений в канале {channelUrl}");
+                    throw new Exception("Сессия не найдена. Пожалуйста, выполните авторизацию.");
                 }
+
+               // _telegramClient.LoadSession(System.IO.File.ReadAllBytes(SessionFilePath));
             }
-            catch (Exception ex)
+
+            // Конфигурация Telegram API для WTelegramClient
+            private static string Config(string what)
             {
-                Console.WriteLine($"Ошибка при парсинге канала {channelUrl}: {ex.Message}");
+                return what switch
+                {
+                    "api_id" => "26908424",              // Замените на ваш API ID
+                    "api_hash" => "9d40c54db3163c9141ef097b97415d37",          // Замените на ваш API HASH
+                    _ => null
+                };
+            }
+
+            // Класс для хранения результата
+            public class ParsedResult
+            {
+                public DateTime Date { get; set; }
+                public string SourceUrl { get; set; }
+                public string Tag { get; set; }
+                public string Text { get; set; }
             }
         }
-
-        private string ExtractTags(string text)
-        {
-            // Определение ключевых слов для тэгов
-            var keywords = new List<string>
-            {
-                "школьное питание",
-                "питание в школах",
-                "питание школьное",
-                "питание школьников",
-                "департамент продовольствия",
-                "департамент питания",
-                "организация питания",
-                "организация школьного питания",
-                "школьное питание",
-                "питание в школах",
-                "питание школьное",
-                "питание школьников",
-                "департамент продовольствия",
-                "департамент питания",
-                "организация питания",
-                "организация школьного питания",
-                "жалоба на питание",
-                "обращение на питание",
-                "качество питания",
-                "качественное питание",
-                "некачественное питание",
-                "жалоба на качество питания",
-                "питание детей",
-                "питание школьников",
-                "питание в казани",
-                "казанское питание",
-                "школы казани",
-                "школьники казани",
-                "poelidovolen",
-
-                "Куда пожаловаться на некачественное питание в школе Казань?",
-                "Куда пожаловаться на некачественное питание в гимназии Казань?",
-                "Куда пожаловаться на некачественное питание в гимназии Казань?",
-                "Куда пожаловаться на некачественное питание в ДОУ Казань?",
-                "Куда пожаловаться на некачественное питание в садике Казань?",
-                "Куда пожаловаться на некачественное питание в больнице Казань?",
-
-                "Жалоба на питание в школе Казань",
-                "Жалоба на питание в гимназии Казань",
-                "Жалоба на питание в гимназии Казань",
-                "Жалоба на питание в ДОУ Казань",
-                "Жалоба на питание в садике Казань",
-                "Жалоба на питание в больнице Казань",
-
-                "Некачественное питание в школе Казань",
-                "Некачественное питание в гимназии Казань",
-                "Некачественное питание в гимназии Казань",
-                "Некачественное питание в ДОУ Казань",
-                "Некачественное питание в садике Казань",
-                "Некачественное питание в больнице Казань",
-
-                "Плохое питание в школе Казань",
-                "Плохое питание в гимназии Казань",
-                "Плохое питание в гимназии Казань",
-                "Плохое питание в ДОУ Казань",
-                "Плохое питание в садике Казань",
-                "Плохое питание в больнице Казань",
-
-                "Ужасное питание в школе Казань",
-                "Ужасное питание в гимназии Казань",
-                "Ужасное питание в гимназии Казань",
-                "Ужасное питание в ДОУ Казань",
-                "Ужасное питание в садике Казань",
-                "Ужасное питание в больнице Казань",
-
-                "Плохо кормят в школе Казань",
-                "Плохо кормят в гимназии Казань",
-                "Плохо кормят в гимназии Казань",
-                "Плохо кормят в ДОУ Казань",
-                "Плохо кормят в садике Казань",
-                "Плохо кормят в больнице Казань",
-
-                "Кому пожаловаться на питание в школе Казань?",
-                "Кому пожаловаться на питание в гимназии Казань?",
-                "Кому пожаловаться на питание в гимназии Казань?",
-                "Кому пожаловаться на питание в ДОУ Казань?",
-                "Кому пожаловаться на питание в садике Казань?",
-                "Кому пожаловаться на питание в больнице Казань?",
-
-                "Куда обратиться по вопросам питания в школе Казань?",
-                "Куда обратиться по вопросам питания в гимназии Казань?",
-                "Куда обратиться по вопросам питания в гимназии Казань?",
-                "Куда обратиться по вопросам питания в ДОУ Казань?",
-                "Куда обратиться по вопросам питания в садике Казань?",
-                "Куда обратиться по вопросам питания в больнице Казань?",
-
-                "Кто кормит в школе Казань",
-                "Кто кормит в гимназии Казань",
-                "Кто кормит в гимназии Казань",
-                "Кто кормит в ДОУ Казань",
-                "Кто кормит в садике Казань",
-                "Кто кормит в больнице Казань",
-
-                "Оставить жалобу на питание в школе Казань",
-                "Оставить жалобу на питаниев гимназии Казань",
-                "Оставить жалобу на питание в гимназии Казань",
-                "Оставить жалобу на питание в ДОУ Казань",
-                "Оставить жалобу на питание в садике Казань",
-                "Оставить жалобу на питание в больнице Казань",
-
-                "Невкусно кормят в школе Казань",
-                "Невкусно кормят в гимназии Казань",
-                "Невкусно кормят в гимназии Казань",
-                "Невкусно кормят в ДОУ Казань",
-                "Невкусно кормят в садике Казань",
-                "Невкусно кормят в больнице Казань",
-
-                "Невкусно кормят в школе Казань",
-                "Невкусно кормят в гимназии Казань",
-                "Невкусно кормят в гимназии Казань",
-                "Невкусно кормят в ДОУ Казань",
-                "Невкусно кормят в садике Казань",
-                "Невкусно кормят в больнице Казань",
-
-                "Школа Казань питание жалоба",
-                "гимназия Казань питание жалоба",
-                "лицей Казань питание жалоба",
-                "ДОУ Казань питание жалоба",
-                "садик Казань питание жалоба",
-                "больница Казань питание жалоба",
-
-                "Где пожаловаться на питание в Казани школа",
-                "Где пожаловаться на питание в Казани гимназия",
-                "Где пожаловаться на питание в Казани лицей",
-                "Где пожаловаться на питание в Казани ДОУ",
-                "Где пожаловаться на питание в Казани сад ",
-                "Где пожаловаться на питание в Казани больница",
-
-                "Оставить жалобу на питание",
-                "Оставить жалобу на питание в Казани"
-            };
-
-            var foundTags = keywords.Where(tag => text.Contains(tag, StringComparison.OrdinalIgnoreCase));
-            return string.Join(", ", foundTags);
-        }
     }
-
-    public class TelegramPost
-    {
-        public string Date { get; set; }
-        public string Time { get; set; }
-        public string Username { get; set; }
-        public string Url { get; set; }
-        public string Tag { get; set; }
-        public string Text { get; set; }
-    }
-
-}
