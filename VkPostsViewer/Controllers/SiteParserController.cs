@@ -3,10 +3,14 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Net.Http;
+using System.Text;
 using System.Threading.Tasks;
+using DeepMorphy;
 using HtmlAgilityPack;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
+using PostsViewer.Controllers;
+using VkNet.Model;
 
 namespace VkPostsViewer.Controllers
 {
@@ -19,7 +23,7 @@ namespace VkPostsViewer.Controllers
             "https://realnoevremya.ru/",
             "https://m.business-gazeta.ru/",
             "https://www.tatar-inform.ru/",
-            "https://kazanfirst.ru/",
+            "https://kazanfirst.ru/", 
             "https://inkazan.ru/",
             "https://prokazan.ru/",
             "https://kazved.ru/",
@@ -27,7 +31,7 @@ namespace VkPostsViewer.Controllers
             "https://tatarstan24.tv/",
             "https://russia-tv.online/efir?region=16",
             "https://tnv.ru/",
-            "https://trt-tv.ru/"
+            "https://trt-tv.ru/" 
         };
 
         private static List<string> Tags = new List<string>
@@ -164,10 +168,16 @@ namespace VkPostsViewer.Controllers
             "Оставить жалобу на питание в Казани"
         };
 
+        private Morphy AnalizerMorphy = new Morphy();
+        private readonly HttpClient _httpClient; // Для взаимодействия с API DeepPavlov
 
-        public SiteParserController(IMemoryCache cache)
+        private static List<string> TagsFiltered = new List<string>();
+
+
+        public SiteParserController(IMemoryCache cache, HttpClient httpClient)
         {
             _cache = cache;
+            _httpClient = httpClient;
         }
 
         [HttpGet("GetParsedData")]
@@ -175,6 +185,7 @@ namespace VkPostsViewer.Controllers
         {
             var cacheKey = "filteredTexts";
             List<ParsedResult> allFilteredResults;
+            TagsFiltered = await PerformMorphologicalAnalysis(Tags);
             var stopwatch = new Stopwatch();
             stopwatch.Start();
 
@@ -215,29 +226,60 @@ namespace VkPostsViewer.Controllers
             var allUrls = ExtractUrlsFromHtml(htmlContent, siteUrl);
 
             var allFilteredResults = new List<ParsedResult>();
-            foreach (var url in allUrls)
+            try
             {
-                if (SiteUrls.Any(site => url.StartsWith(site, StringComparison.OrdinalIgnoreCase)))
+                foreach (var url in allUrls)
                 {
-                    var content = await FetchHtmlContent(url);
-                    var extractedTexts = ExtractTextFromHtml(content);
-                    var filteredTexts = FilterTextsByTags(extractedTexts, Tags);
-
-                    foreach (var text in filteredTexts)
+                    if (SiteUrls.Any(site => url.StartsWith(site, StringComparison.OrdinalIgnoreCase)))
                     {
-                        var publishDate = ExtractPublishDate(content) ?? DateTime.Now; // Время публикации
-                        allFilteredResults.Add(new ParsedResult
+                        try
                         {
-                            Date = publishDate, // Устанавливаем извлечённое время публикации
-                            SourceUrl = url,
-                            Tag = Tags.First(tag => text.Contains(tag, StringComparison.OrdinalIgnoreCase)),
-                            Text = text
-                        });
+                            var content = await FetchHtmlContent(url);
+                            var extractedTexts = ExtractTextFromHtml(content);
+                            var filteredTexts = FilterTextsByTags(extractedTexts, TagsFiltered);
+
+                            foreach (var text in filteredTexts)
+                            {
+                                var publishDate = ExtractPublishDate(content) ?? DateTime.Now; // Время публикации
+                                var sentiment = await AnalyzeSentiment(text); // Асинхронный вызов анализа настроений
+                                allFilteredResults.Add(new ParsedResult
+                                {
+                                    Date = publishDate, // Устанавливаем извлечённое время публикации
+                                    SourceUrl = url,
+                                    Tag = Tags.First(tag => text.Contains(tag, StringComparison.OrdinalIgnoreCase)),
+                                    Text = text,
+                                    Sentiment = sentiment
+                                });
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Error fetching content from {url}: {ex.Message}");
+                        }
                     }
                 }
             }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error fetching site {siteUrl}: {ex.Message}");
+            }
 
             return allFilteredResults;
+        }
+
+        private async Task<string> AnalyzeSentiment(string text)
+        {
+            var json = Newtonsoft.Json.JsonConvert.SerializeObject(new { text = text });
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+            var response = await _httpClient.PostAsync("http://121.127.37.60:5000/sentiment", content);
+            if (response.IsSuccessStatusCode)
+            {
+                var responseBody = await response.Content.ReadAsStringAsync();
+                return Newtonsoft.Json.JsonConvert.DeserializeObject<List<SentimentResponse>>(responseBody)[0].Label; // Обработка результата
+            }
+
+            return "Error"; // Обработка ошибок
         }
 
         private async Task<string> FetchHtmlContent(string url)
@@ -289,6 +331,33 @@ namespace VkPostsViewer.Controllers
             return extractedTexts;
         }
 
+        private async Task<List<string>> PerformMorphologicalAnalysis(List<string> text)
+        {
+            List<string> newText = new List<string>();
+
+            foreach (var morph in text)
+            {
+                var a = morph.Split(' ').ToList();
+                foreach (var b in a)
+                {
+                    if (b.Length > 4)
+                        newText.Add(b);
+                }
+            }
+            var reluts = AnalizerMorphy.Analyzer.Parse(newText).ToList();
+
+            foreach (var item in reluts)
+            {
+                foreach (var a in item.Tags.ToList())
+                {
+                    if (!TagsFiltered.Contains(a.Lemma))
+                        TagsFiltered.Add(a.Lemma);
+                }
+            }
+
+            return TagsFiltered ?? new List<string>();
+        }
+
         private List<string> FilterTextsByTags(IEnumerable<string> texts, List<string> tags)
         {
             return texts.Where(text =>
@@ -322,6 +391,7 @@ namespace VkPostsViewer.Controllers
             public string SourceUrl { get; set; }
             public string Tag { get; set; }
             public string Text { get; set; }
+            public string Sentiment { get; set; }
         }
     }
 }

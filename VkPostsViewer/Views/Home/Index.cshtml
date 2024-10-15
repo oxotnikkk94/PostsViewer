@@ -4,7 +4,8 @@
 
 <h2>Парсинг сайтов по ключевым словам</h2>
 
-<a href="/telegram">Перейти к парсингу Telegram-каналов</a>
+@* <a href="/telegram">Перейти к парсингу Telegram-каналов</a> *@
+<a href="/vk/GetFilteredNews">Перейти к парсингу ВКонтакте</a>
 
 <div id="loadingMessage" style="display: none;">
     Идет загрузка, пожалуйста, подождите...
@@ -17,6 +18,7 @@
             <th>Источник</th>
             <th>Тег</th>
             <th>Текст</th>
+            <th>Настроение</th>
         </tr>
     </thead>
     <tbody>
@@ -77,6 +79,10 @@
                     textCell.appendChild(details);
 
                     row.appendChild(textCell);
+
+                    const sentimentCell = document.createElement("td"); // Ячейка для настроения
+                    sentimentCell.textContent = item.sentiment; // Отображение анализа настроения
+                    row.appendChild(sentimentCell); // Добавляем ячейку в строку
 
                     tableBody.appendChild(row);
                 });
