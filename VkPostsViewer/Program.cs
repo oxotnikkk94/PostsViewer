@@ -34,8 +34,8 @@ app.MapControllerRoute(
 
 app.MapControllerRoute(
     name: "parsing",
-    pattern: "parsing",
-    defaults: new { controller = "Telegram", action = "Index" });
+    pattern: "telegram/{action=GetFilteredNews}/{id?}",
+    defaults: new { controller = "Telegram" });
 
 app.MapControllerRoute(
         name: "vk",
